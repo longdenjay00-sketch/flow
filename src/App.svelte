@@ -1,163 +1,188 @@
 <script lang="ts">
-  import { entries, formatDate, formatWriters } from './lib/entries'
+  import SongList from './lib/SongList.svelte'
+  import SongSheet from './lib/SongSheet.svelte'
+  import WordDesk from './lib/WordDesk.svelte'
+  import { entries } from './lib/entries'
+  import { sectionsToLyrics } from './lib/lyrics'
+  import {
+    blankSong,
+    downloadSong,
+    loadSongs,
+    saveSongs,
+    type LocalSong,
+  } from './lib/localSongs'
 
-  let activeSlug = $state(entries[0]?.slug ?? '')
-  let entry = $derived(entries.find((item) => item.slug === activeSlug) ?? null)
+  let songs = $state<LocalSong[]>(loadSongs())
+  let activeKey = $state(entries[0] ? `repo:${entries[0].slug}` : '')
+  let panel = $state<'songs' | 'song' | 'words'>('song')
+  let lookup = $state('')
+  let saveNote = $state('')
+  let insertWord = $state<((word: string) => void) | null>(null)
 
-  function choose(slug: string) {
-    activeSlug = slug
+  let activeSong = $derived(songs.find((song) => activeKey === `local:${song.id}`) ?? null)
+  let activeEntry = $derived(entries.find((entry) => activeKey === `repo:${entry.slug}`) ?? null)
+  let editing = $derived(activeSong !== null)
+
+  function select(key: string) {
+    activeKey = key
+    panel = 'song'
+    saveNote = key.startsWith('local:') ? 'Saved on this device' : ''
+  }
+
+  function persist(next: LocalSong[], note: string) {
+    songs = next
+    saveNote = saveSongs(next) ? note : "Couldn't save in this browser."
+  }
+
+  function createSong() {
+    const song = blankSong()
+    persist([song, ...songs], 'Saved on this device')
+    activeKey = `local:${song.id}`
+    panel = 'song'
+  }
+
+  function patch(partial: Partial<LocalSong>) {
+    if (!activeSong) return
+    const id = activeSong.id
+    persist(
+      songs.map((song) =>
+        song.id === id ? { ...song, ...partial, updated: new Date().toISOString() } : song,
+      ),
+      'Saved on this device',
+    )
+  }
+
+  function removeSong() {
+    if (!activeSong) return
+    const id = activeSong.id
+    const next = songs.filter((song) => song.id !== id)
+    persist(next, '')
+    activeKey = next[0] ? `local:${next[0].id}` : entries[0] ? `repo:${entries[0].slug}` : ''
+  }
+
+  function duplicateEntry() {
+    if (!activeEntry) return
+    const song = blankSong()
+    song.title = activeEntry.title
+    song.writers = activeEntry.writers.join(', ')
+    song.lyrics = sectionsToLyrics(activeEntry.sections)
+    persist([song, ...songs], 'Copied onto this device')
+    activeKey = `local:${song.id}`
+    panel = 'song'
+  }
+
+  function pickSuggestion(word: string) {
+    lookup = word
+    insertWord?.(word)
   }
 </script>
 
-<div class="page">
-  <header class="top">
-    <p class="mark">flow</p>
-    {#if entries.length > 0}
-      <nav class="dates" aria-label="Entries">
-        {#each entries as item (item.slug)}
-          <button
-            type="button"
-            class:active={item.slug === entry?.slug}
-            aria-current={item.slug === entry?.slug ? 'page' : undefined}
-            onclick={() => choose(item.slug)}
-          >
-            {item.date}
-          </button>
-        {/each}
-      </nav>
-    {/if}
+<div class="shell" data-panel={panel}>
+  <header>
+    <div class="brand">
+      <p class="mark">flow</p>
+      <button type="button" class="new" onclick={createSong}>New song</button>
+    </div>
+    <div class="tabs" role="tablist" aria-label="Sections">
+      <button type="button" role="tab" aria-selected={panel === 'songs'} onclick={() => (panel = 'songs')}>Songs</button>
+      <button type="button" role="tab" aria-selected={panel === 'song'} onclick={() => (panel = 'song')}>Song</button>
+      <button type="button" role="tab" aria-selected={panel === 'words'} onclick={() => (panel = 'words')}>Words</button>
+    </div>
   </header>
 
-  <main>
-    {#if entry}
-      <article>
-        <p class="date">{formatDate(entry.date)}</p>
-        <h1>{entry.title}</h1>
-        {#if entry.writers.length > 0}
-          <p class="writers">Written by {formatWriters(entry.writers)}</p>
-        {/if}
+  <SongList {entries} {songs} {activeKey} onselect={select} />
 
-        {#each entry.sections as section, index (`${section.label}-${index}`)}
-          <section>
-            {#if section.label}
-              <h2>{section.label}</h2>
-            {/if}
-            {#each section.lines as line}
-              <p>{line}</p>
-            {/each}
-          </section>
-        {/each}
-      </article>
-    {:else}
-      <p class="empty">No entries yet.</p>
-    {/if}
-  </main>
+  <SongSheet
+    kind={activeSong ? 'local' : activeEntry ? 'repo' : 'empty'}
+    songKey={activeKey}
+    title={activeSong ? activeSong.title : activeEntry?.title ?? ''}
+    writersText={activeSong ? activeSong.writers : activeEntry?.writers.join(', ') ?? ''}
+    dateLabel={activeSong ? activeSong.updated : activeEntry?.date ?? ''}
+    lyrics={activeSong?.lyrics ?? ''}
+    sections={activeEntry?.sections ?? []}
+    status={activeSong ? saveNote : ''}
+    onword={(word) => (lookup = word)}
+    ontitle={(value) => patch({ title: value })}
+    onwriters={(value) => patch({ writers: value })}
+    onlyrics={(value) => patch({ lyrics: value })}
+    ondownload={() => activeSong && downloadSong(activeSong)}
+    ondelete={removeSong}
+    onduplicate={duplicateEntry}
+    oninsert={(insert) => (insertWord = insert)}
+  />
+
+  <WordDesk incoming={lookup} {editing} onpick={pickSuggestion} />
 </div>
 
 <style>
-  .page {
-    min-height: 100vh;
-    display: flex;
-    flex-direction: column;
+  .shell {
+    height: 100vh;
+    height: 100dvh;
+    display: grid;
+    grid-template-columns: 16.5rem minmax(0, 1fr) 22rem;
+    grid-template-rows: auto minmax(0, 1fr);
   }
 
-  .top {
+  header {
+    grid-column: 1 / -1;
     display: flex;
     justify-content: space-between;
-    gap: 1.5rem;
-    align-items: baseline;
-    padding: 1.25rem 1.5rem;
+    gap: 1rem;
+    align-items: center;
+    padding: 0.85rem 1rem;
     border-bottom: 1px solid var(--line);
+  }
+
+  .brand {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
   }
 
   .mark {
     margin: 0;
     font-family: var(--font-mono);
     letter-spacing: 0.22em;
-    text-transform: lowercase;
     font-size: 0.78rem;
   }
 
-  .dates {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.75rem;
-    justify-content: flex-end;
-  }
-
-  .dates button {
-    padding: 0;
-    color: var(--muted);
+  .new,
+  .tabs button {
     font-family: var(--font-mono);
-    font-size: 0.75rem;
-  }
-
-  .dates button.active {
-    color: var(--ice);
-  }
-
-  main {
-    width: min(40rem, calc(100% - 2.5rem));
-    margin: 0 auto;
-    padding: 4.5rem 0 6rem;
-  }
-
-  .date,
-  .writers,
-  h2 {
-    font-family: var(--font-mono);
-    color: var(--muted);
-    letter-spacing: 0.14em;
-    text-transform: uppercase;
     font-size: 0.72rem;
-    font-weight: 500;
-  }
-
-  .date,
-  .writers {
-    margin: 0;
-  }
-
-  h1 {
-    margin: 0.7rem 0 0.85rem;
-    font-size: clamp(3rem, 8vw, 5.4rem);
-    font-weight: 550;
-    letter-spacing: -0.045em;
-    line-height: 0.9;
-  }
-
-  section {
-    margin-top: 2.4rem;
-  }
-
-  h2 {
-    margin: 0 0 0.85rem;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
     color: var(--ice);
   }
 
-  section p {
-    margin: 0;
-    font-size: 1.2rem;
-    line-height: 1.55;
+  .tabs {
+    display: none;
+    gap: 0.9rem;
   }
 
-  .empty {
+  .tabs button[aria-selected='false'] {
     color: var(--muted);
   }
 
-  @media (max-width: 640px) {
-    .top {
-      flex-direction: column;
-      align-items: flex-start;
-      gap: 0.8rem;
+  @media (max-width: 900px) {
+    .shell {
+      grid-template-columns: 1fr;
     }
 
-    .dates {
-      justify-content: flex-start;
+    .tabs {
+      display: flex;
     }
 
-    main {
-      padding-top: 2.5rem;
+    .shell :global(.list),
+    .shell :global(.sheet),
+    .shell :global(.desk) {
+      display: none;
+    }
+
+    .shell[data-panel='songs'] :global(.list),
+    .shell[data-panel='song'] :global(.sheet),
+    .shell[data-panel='words'] :global(.desk) {
+      display: block;
     }
   }
 </style>

@@ -14,7 +14,7 @@
 }
 
 html, body, #app {
-  min-height: 100%;
+  height: 100%;
 }
 
 body {
@@ -23,6 +23,12 @@ body {
   color: var(--text);
   font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
+  overflow: hidden;
+}
+
+:focus-visible {
+  outline: 1px solid var(--ice);
+  outline-offset: 2px;
 }
 
 button {

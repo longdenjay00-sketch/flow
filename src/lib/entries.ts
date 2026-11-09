@@ -1,7 +1,6 @@
-export type Section = {
-  label: string
-  lines: string[]
-}
+import { parseSections, type Section } from './lyrics'
+
+export type { Section }
 
 export type Entry = {
   slug: string
@@ -63,29 +62,6 @@ function asList(value: string | string[] | undefined): string[] {
   return []
 }
 
-function parseSections(body: string): Section[] {
-  const sections: Section[] = []
-  let current: Section | null = null
-
-  for (const line of body.split('\n')) {
-    const trimmed = line.trim()
-    const label = trimmed.match(/^\[(.+)]$/)
-    if (label) {
-      current = { label: label[1], lines: [] }
-      sections.push(current)
-      continue
-    }
-    if (!trimmed || trimmed.startsWith('#') || /written by /i.test(trimmed)) continue
-    if (!current) {
-      current = { label: '', lines: [] }
-      sections.push(current)
-    }
-    current.lines.push(trimmed)
-  }
-
-  return sections.filter((section) => section.lines.length > 0)
-}
-
 function slugFromPath(path: string): string {
   const file = path.split('/').pop() ?? path
   return file.replace(/\.md$/, '')
@@ -104,21 +80,3 @@ export const entries: Entry[] = Object.entries(entryFiles)
     }
   })
   .sort((a, b) => b.date.localeCompare(a.date) || b.slug.localeCompare(a.slug))
-
-export function formatDate(iso: string): string {
-  const match = iso.match(/^(\d{4})-(\d{2})-(\d{2})$/)
-  if (!match) return iso
-  const date = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]))
-  return date.toLocaleDateString('en-US', {
-    month: 'long',
-    day: 'numeric',
-    year: 'numeric',
-  })
-}
-
-export function formatWriters(writers: string[]): string {
-  if (writers.length === 0) return ''
-  if (writers.length === 1) return writers[0]
-  if (writers.length === 2) return `${writers[0]} and ${writers[1]}`
-  return `${writers.slice(0, -1).join(', ')}, and ${writers[writers.length - 1]}`
-}
